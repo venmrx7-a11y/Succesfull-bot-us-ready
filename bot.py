@@ -15,8 +15,8 @@ print("🔥 KALYUG ESCROW DEAL BOT STARTING...")
 print("=" * 60)
 
 # ============ CONFIG ============
-BOT_TOKEN = "8757118802:AAFDB4fGZhGMk9lbjww8So-_wU3hCOmBEe0"
-OWNER_ID = 8586849798
+BOT_TOKEN = "8999246230:AAG23Gx0QyCMHOmvMMs00TFjUBW8AO-OZxw"
+OWNER_ID = 7977493987
 GROUP_ID = -1003920615096
 JOIN_GROUP_LINK = "https://t.me/+5Z_XCSm-BzE4YTJl"
 
@@ -33,17 +33,18 @@ flask_app = Flask(__name__)
 @flask_app.route('/')
 @flask_app.route('/health')
 def health():
-    return "Bot is running!", 200
+    return jsonify({"status": "running", "time": str(datetime.now())}), 200
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
-    flask_app.run(host='0.0.0.0', port=port)
+    flask_app.run(host='0.0.0.0', port=port, debug=False)
 
 # ============ PREMIUM EMOJIS ============
 PREMIUM_EMOJIS = [
     "🔥", "✅", "💰", "👑", "⭐", "✨", "🎲", "🏆", "🎁", 
     "🔒", "🔓", "📱", "ℹ️", "📋", "💎", "🌟", "🎯", "🚀",
-    "💫", "🌈", "⚡", "💥", "🎨", "🛡️", "📌", "🔹", "🔸"
+    "💫", "🌈", "⚡", "💥", "🎨", "🛡️", "📌", "🔹", "🔸",
+    "💜", "💙", "💚", "💛", "🧡", "❤️", "🖤", "🤍", "💗"
 ]
 
 def get_random_emoji():
@@ -147,6 +148,14 @@ def get_deal(deal_id):
     deals = load_deals()
     return deals.get(deal_id, None)
 
+def update_deal_status(deal_id, status):
+    deals = load_deals()
+    if deal_id in deals:
+        deals[deal_id]['status'] = status
+        save_deals(deals)
+        return True
+    return False
+
 # ============ SETTINGS ============
 def load_settings():
     return load_json(SETTINGS_FILE, {
@@ -184,6 +193,10 @@ def add_gif(name, file_id):
 def get_gif(name):
     gifs = load_gifs()
     return gifs.get(name.lower(), None)
+
+def list_gifs():
+    gifs = load_gifs()
+    return list(gifs.keys())
 
 # ============ DEAL FORM ============
 def parse_deal_form(text):
@@ -244,6 +257,7 @@ Please join our group to use this bot:
 /send - Send to group
 /dice - Play dice
 /check DEAL_ID - Check deal
+/gif NAME - Send GIF
 
 👑 <b>Owner Commands:</b>
 /approve USER_ID - Add admin
@@ -252,8 +266,8 @@ Please join our group to use this bot:
 /setunlock HH:MM - Set unlock time
 /setmorning SPEECH - Set morning speech
 /setnight SPEECH - Set night speech
-/addgif NAME - Reply to GIF
-/gif NAME - Send GIF
+/addgif NAME - Reply to GIF to add
+/listgifs - List all GIFs
 
 ━━━━━━━━━━━━━━━━━━
 🔥 @𝙆𝘼𝙇𝙔𝙐𝙂𝙀𝙎𝘾𝙍𝙊𝙒𝙎𝙀𝙍𝙑𝙄𝘾𝙀
@@ -293,6 +307,7 @@ async def help_command(update, context):
 /setmorning SPEECH - Set morning speech
 /setnight SPEECH - Set night speech
 /addgif NAME - Reply to GIF to add
+/listgifs - List all GIFs
 
 ━━━━━━━━━━━━━━━━━━
 🔥 @𝙆𝘼𝙇𝙔𝙐𝙂𝙀𝙎𝘾𝙍𝙊𝙒𝙎𝙀𝙍𝙑𝙄𝘾𝙀
@@ -472,6 +487,18 @@ async def send_command(update, context):
                 animation=msg.animation.file_id,
                 caption=format_with_emojis(msg.caption) if msg.caption else ""
             )
+        elif msg.video:
+            await context.bot.send_video(
+                chat_id=GROUP_ID,
+                video=msg.video.file_id,
+                caption=format_with_emojis(msg.caption) if msg.caption else ""
+            )
+        elif msg.document:
+            await context.bot.send_document(
+                chat_id=GROUP_ID,
+                document=msg.document.file_id,
+                caption=format_with_emojis(msg.caption) if msg.caption else ""
+            )
         else:
             await update.message.reply_text("❌ Unsupported media type!")
             return
@@ -496,18 +523,18 @@ async def dice_command(update, context):
         await update.message.reply_text("❌ Admin only!")
         return
     
-    result = random.randint(1, 6)
-    win = result >= 4
-    
     # Try to send GIF if exists
     gif = get_gif('dice')
     if gif:
         await update.message.reply_animation(
             gif,
-            caption=f"🎲 <b>ROLLING...</b>",
+            caption="🎲 <b>ROLLING...</b>",
             parse_mode="HTML"
         )
         await asyncio.sleep(1.5)
+    
+    result = random.randint(1, 6)
+    win = result >= 4
     
     msg = f"""
 🎲 <b>𝘿𝙄𝘾𝙀 𝙂𝘼𝙈𝙀</b>
@@ -556,6 +583,23 @@ async def gif_command(update, context):
         await update.message.reply_animation(gif)
     else:
         await update.message.reply_text(f"❌ GIF '{name}' not found!")
+
+async def list_gifs_command(update, context):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Admin only!")
+        return
+    
+    gif_list = list_gifs()
+    if not gif_list:
+        await update.message.reply_text("📭 No GIFs added yet!")
+        return
+    
+    msg = "🎬 <b>GIF LIST</b>\n━━━━━━━━━━━━━━━━━━\n\n"
+    for name in gif_list:
+        msg += f"🔹 {name}\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n💡 Use /gif NAME to send"
+    
+    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
 
 async def check_deal(update, context):
     if not is_admin(update.effective_user.id):
@@ -769,6 +813,7 @@ def main():
     application.add_handler(CommandHandler("dice", dice_command))
     application.add_handler(CommandHandler("check", check_deal))
     application.add_handler(CommandHandler("gif", gif_command))
+    application.add_handler(CommandHandler("listgifs", list_gifs_command))
     
     # Owner commands
     application.add_handler(CommandHandler("approve", approve_admin))
@@ -796,4 +841,9 @@ def main():
     application.run_polling()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import time
+        time.sleep(5)
