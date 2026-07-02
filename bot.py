@@ -1,849 +1,835 @@
+import re
+import json
 import os
 import sys
 import random
 import asyncio
-import json
-import threading
-import re
-from datetime import datetime
-from flask import Flask, jsonify
+import string
+import time
+from datetime import datetime, time as dtime, timedelta
+from threading import Thread
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-print("=" * 60)
-print("🔥 KALYUG ESCROW DEAL BOT STARTING...")
-print("=" * 60)
-
-# ============ CONFIG ============
-BOT_TOKEN = "8998803283:AAE4ugFUIoRYm1CSMu7f1OaqB0yrPDik548"
-OWNER_ID = 8586849798
-GROUP_ID = -1003920615096
-JOIN_GROUP_LINK = "https://t.me/+5Z_XCSm-BzE4YTJl"
-
-# ============ FILES ============
-ADMINS_FILE = "admins.json"
-DEALS_FILE = "deals.json"
-SETTINGS_FILE = "settings.json"
-SPEECH_FILE = "speech.json"
-GIFS_FILE = "gifs.json"
-
-# ============ FLASK ============
+# ============ FLASK FOR RENDER ============
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 @flask_app.route('/health')
 def health():
-    return jsonify({"status": "running", "time": str(datetime.now())}), 200
+    return "KALYUG ESCROW BOT is running!", 200
 
 def run_flask():
-    port = int(os.environ.get('PORT', 10000))
-    flask_app.run(host='0.0.0.0', port=port, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    flask_app.run(host='0.0.0.0', port=port)
+
+# ============ CONFIG ============
+BOT_TOKEN = "8885172416:AAFRtSo5uGlTSZBBQgU62Xal8XPgu571tjg"
+OWNER_ID = 7977493987
+ADMIN_IDS = [OWNER_ID]
+
+# Group IDs
+GROUP_ID = -1003920615096
+JOIN_GROUP_ID = -1002353854365
+JOIN_GROUP_LINK = "https://t.me/+5Z_XCSm-BzE4YTJl"
+
+USERS_FILE = "users.json"
+DEALS_FILE = "deals.json"
+ADMINS_FILE = "admins.json"
+CONFIG_FILE = "config.json"
+GIFS_FILE = "gifs.json"
+
+# ============ LOAD/SAVE ============
+def load_json(filepath, default=None):
+    if default is None:
+        default = {}
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except:
+            return default
+    return default
+
+def save_json(filepath, data):
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+
+# ============ DATA ============
+users = load_json(USERS_FILE)
+deals = load_json(DEALS_FILE)
+admins_data = load_json(ADMINS_FILE, {"approved": [str(OWNER_ID)]})
+config = load_json(CONFIG_FILE, {
+    "lock_enabled": False,
+    "lock_time": None,
+    "unlock_time": None,
+    "morning_speech": "",
+    "locked": False
+})
+gifs_data = load_json(GIFS_FILE, {"gifs": {}})
+
+# Ensure owner is admin
+if str(OWNER_ID) not in admins_data.get("approved", []):
+    admins_data.setdefault("approved", []).append(str(OWNER_ID))
+    save_json(ADMINS_FILE, admins_data)
 
 # ============ PREMIUM EMOJIS ============
-PREMIUM_EMOJIS = [
-    "🔥", "✅", "💰", "👑", "⭐", "✨", "🎲", "🏆", "🎁", 
-    "🔒", "🔓", "📱", "ℹ️", "📋", "💎", "🌟", "🎯", "🚀",
-    "💫", "🌈", "⚡", "💥", "🎨", "🛡️", "📌", "🔹", "🔸",
-    "💜", "💙", "💚", "💛", "🧡", "❤️", "🖤", "🤍", "💗"
-]
+PREMIUM_EMOJIS = {
+    "verified": {"id": "6246537187614005254", "fallback": "✅"},
+    "verify": {"id": "6246782404476803545", "fallback": "✅"},
+    "verify_blue": {"id": "6010060634803148161", "fallback": "✅"},
+    "eye": {"id": "6035338338406242050", "fallback": "👁️"},
+    "eyeball": {"id": "6035051267087143217", "fallback": "👁️"},
+    "eyes": {"id": "6035225389356290238", "fallback": "👀"},
+    "fire": {"id": "4956222745814762495", "fallback": "🔥"},
+    "fire_red": {"id": "4956606007221421405", "fallback": "🔥"},
+    "explosion": {"id": "6032673796530377389", "fallback": "💥"},
+    "heart": {"id": "5783157259152397008", "fallback": "❤️"},
+    "heart_red": {"id": "5801084710343938087", "fallback": "❤️"},
+    "heart_pink": {"id": "6010280773351904888", "fallback": "❤️"},
+    "heart_blue": {"id": "5780496071645991525", "fallback": "💙"},
+    "heart_green": {"id": "5888789252493283486", "fallback": "💚"},
+    "heart_yellow": {"id": "5840261097719148872", "fallback": "💛"},
+    "heart_purple": {"id": "5840265018655703965", "fallback": "💜"},
+    "heart_black": {"id": "5840266939932994956", "fallback": "🖤"},
+    "star": {"id": "6244496562752331516", "fallback": "⭐"},
+    "star_gold": {"id": "5904618938578243567", "fallback": "⭐"},
+    "star_glow": {"id": "6010156854955480259", "fallback": "🌟"},
+    "sparkle": {"id": "6010338729640596556", "fallback": "✨"},
+    "sparkle_blue": {"id": "6010086134023985536", "fallback": "✨"},
+    "vampire": {"id": "6034871295072539452", "fallback": "🧛"},
+    "monster": {"id": "6034962795055812935", "fallback": "👹"},
+    "ghost": {"id": "6035070298087231243", "fallback": "👻"},
+    "devil": {"id": "6035242444671421879", "fallback": "👿"},
+    "crown": {"id": "5794422335599546668", "fallback": "👑"},
+    "crown_gold": {"id": "6089003761496232797", "fallback": "👑"},
+    "crown_blue": {"id": "6247039939305808563", "fallback": "👑"},
+    "money": {"id": "6089104607328342288", "fallback": "💰"},
+    "money_bag": {"id": "6086730718774300509", "fallback": "💰"},
+    "dollar": {"id": "6089140105233044310", "fallback": "💵"},
+    "diamond": {"id": "6086778246882399112", "fallback": "💎"},
+    "like": {"id": "6089313931149448495", "fallback": "👍"},
+    "unlike": {"id": "6088789257285988672", "fallback": "👎"},
+    "clap": {"id": "6093744967304352336", "fallback": "👏"},
+    "smile": {"id": "6093864814071780526", "fallback": "😀"},
+    "laugh": {"id": "5782741660936966676", "fallback": "😂"},
+    "heart_eyes": {"id": "6010179687001625256", "fallback": "😍"},
+    "cool": {"id": "6032853480782172520", "fallback": "😎"},
+    "sad": {"id": "5780793884678296697", "fallback": "😢"},
+    "angry": {"id": "6035355642829475999", "fallback": "😡"},
+    "think": {"id": "5782756916660802905", "fallback": "🤔"},
+    "lock_emoji": {"id": "5465443379917629504", "fallback": "🔓"},
+    "sigma_emoji": {"id": "6235620067942341623", "fallback": "🥃"},
+    "don_emoji": {"id": "6235717714023814969", "fallback": "🍂"},
+    "skills_emoji": {"id": "6235593671073339928", "fallback": "💀"},
+    "bolt": {"id": "5791970059597386804", "fallback": "⚡"},
+}
+
+ALL_PREMIUM_KEYS = list(PREMIUM_EMOJIS.keys())
+
+def get_emoji_html(name):
+    name = name.lower().strip()
+    if name in PREMIUM_EMOJIS:
+        data = PREMIUM_EMOJIS[name]
+        return f'<tg-emoji emoji-id="{data["id"]}">{data["fallback"]}</tg-emoji>'
+    return ""
 
 def get_random_emoji():
-    return random.choice(PREMIUM_EMOJIS)
+    if not ALL_PREMIUM_KEYS:
+        return ""
+    return get_emoji_html(random.choice(ALL_PREMIUM_KEYS))
 
-def format_with_emojis(text):
-    """Har line ke aage aur piche premium emojis"""
+def wrap_with_emojis(text):
     lines = text.split('\n')
-    formatted = []
+    result = []
     for line in lines:
         if line.strip():
-            left = get_random_emoji()
-            right = get_random_emoji()
-            formatted.append(f"{left} {line} {right}")
+            le = get_random_emoji()
+            re = get_random_emoji()
+            result.append(f"{le} {line} {re}")
         else:
-            formatted.append(line)
-    return '\n'.join(formatted)
+            result.append(line)
+    return '\n'.join(result)
 
 def to_fancy(text):
-    """Stylish text"""
     fancy_map = {
-        'A': '𝘼', 'B': '𝘽', 'C': '𝘾', 'D': '𝘿', 'E': '𝙀',
-        'F': '𝙁', 'G': '𝙂', 'H': '𝙃', 'I': '𝙄', 'J': '𝙅',
-        'K': '𝙆', 'L': '𝙇', 'M': '𝙈', 'N': '𝙉', 'O': '𝙊',
-        'P': '𝙋', 'Q': '𝙌', 'R': '𝙍', 'S': '𝙎', 'T': '𝙏',
-        'U': '𝙐', 'V': '𝙑', 'W': '𝙒', 'X': '𝙓', 'Y': '𝙔',
-        'Z': '𝙕', 'a': '𝙖', 'b': '𝙗', 'c': '𝙘', 'd': '𝙙',
-        'e': '𝙚', 'f': '𝙛', 'g': '𝙜', 'h': '𝙝', 'i': '𝙞',
-        'j': '𝙟', 'k': '𝙠', 'l': '𝙡', 'm': '𝙢', 'n': '𝙣',
-        'o': '𝙤', 'p': '𝙥', 'q': '𝙦', 'r': '𝙧', 's': '𝙨',
-        't': '𝙩', 'u': '𝙪', 'v': '𝙫', 'w': '𝙬', 'x': '𝙭',
-        'y': '𝙮', 'z': '𝙯', '0': '𝟎', '1': '𝟏', '2': '𝟐',
-        '3': '𝟑', '4': '𝟒', '5': '𝟓', '6': '𝟔', '7': '𝟕',
-        '8': '𝟖', '9': '𝟗'
+        'A': '𝐀', 'B': '𝐁', 'C': '𝐂', 'D': '𝐃', 'E': '𝐄', 'F': '𝐅', 'G': '𝐆', 'H': '𝐇', 'I': '𝐈',
+        'J': '𝐉', 'K': '𝐊', 'L': '𝐋', 'M': '𝐌', 'N': '𝐍', 'O': '𝐎', 'P': '𝐏', 'Q': '𝐐', 'R': '𝐑',
+        'S': '𝐒', 'T': '𝐓', 'U': '𝐔', 'V': '𝐕', 'W': '𝐖', 'X': '𝐗', 'Y': '𝐘', 'Z': '𝐙',
+        'a': '𝐚', 'b': '𝐛', 'c': '𝐜', 'd': '𝐝', 'e': '𝐞', 'f': '𝐟', 'g': '𝐠', 'h': '𝐡', 'i': '𝐢',
+        'j': '𝐣', 'k': '𝐤', 'l': '𝐥', 'm': '𝐦', 'n': '𝐧', 'o': '𝐨', 'p': '𝐩', 'q': '𝐪', 'r': '𝐫',
+        's': '𝐬', 't': '𝐭', 'u': '𝐮', 'v': '𝐯', 'w': '𝐰', 'x': '𝐱', 'y': '𝐲', 'z': '𝐳',
+        '0': '𝟎', '1': '𝟏', '2': '𝟐', '3': '𝟑', '4': '𝟒', '5': '𝟓', '6': '𝟔', '7': '𝟕', '8': '𝟖', '9': '𝟗'
     }
     return ''.join(fancy_map.get(c, c) for c in text)
 
-# ============ DATABASE ============
-def load_json(filename, default=None):
-    if os.path.exists(filename):
-        try:
-            with open(filename, 'r') as f:
-                return json.load(f)
-        except:
-            return default or {}
-    return default or {}
+def generate_deal_id():
+    chars = string.ascii_uppercase + string.digits
+    return "KAL-" + ''.join(random.choices(chars, k=6))
 
-def save_json(filename, data):
-    with open(filename, 'w') as f:
-        json.dump(data, f, indent=2)
+def is_admin_user(user_id):
+    return str(user_id) in admins_data.get("approved", [])
 
-# ============ ADMINS ============
-def load_admins():
-    admins = load_json(ADMINS_FILE, [])
-    if OWNER_ID not in admins:
-        admins.append(OWNER_ID)
-        save_json(ADMINS_FILE, admins)
-    return admins
-
-def is_admin(user_id):
-    return user_id in load_admins()
-
-def is_owner(user_id):
+def is_owner_user(user_id):
     return user_id == OWNER_ID
 
-def add_admin(user_id):
-    admins = load_admins()
-    if user_id not in admins:
-        admins.append(user_id)
-        save_json(ADMINS_FILE, admins)
+def register_user(user_id, username, first_name):
+    uid = str(user_id)
+    if uid not in users:
+        users[uid] = {
+            "id": user_id,
+            "username": username or "NoUsername",
+            "name": first_name,
+            "joined": str(datetime.now())
+        }
+        save_json(USERS_FILE, users)
         return True
     return False
-
-def remove_admin(user_id):
-    admins = load_admins()
-    if user_id in admins and user_id != OWNER_ID:
-        admins.remove(user_id)
-        save_json(ADMINS_FILE, admins)
-        return True
-    return False
-
-# ============ DEALS ============
-def load_deals():
-    return load_json(DEALS_FILE, {})
-
-def save_deals(deals):
-    save_json(DEALS_FILE, deals)
-
-def create_deal(deal_data):
-    deals = load_deals()
-    deal_id = f"DEAL_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    deals[deal_id] = {
-        **deal_data,
-        "date": str(datetime.now()),
-        "status": "ACTIVE"
-    }
-    save_deals(deals)
-    return deal_id
-
-def get_deal(deal_id):
-    deals = load_deals()
-    return deals.get(deal_id, None)
-
-def update_deal_status(deal_id, status):
-    deals = load_deals()
-    if deal_id in deals:
-        deals[deal_id]['status'] = status
-        save_deals(deals)
-        return True
-    return False
-
-# ============ SETTINGS ============
-def load_settings():
-    return load_json(SETTINGS_FILE, {
-        "lock_time": "19:30",
-        "unlock_time": "07:00",
-        "group_locked": False
-    })
-
-def save_settings(settings):
-    save_json(SETTINGS_FILE, settings)
-
-# ============ SPEECH ============
-def load_speeches():
-    return load_json(SPEECH_FILE, {
-        "morning": "🌅 Good Morning! New day, new deals!",
-        "night": "🌙 Good Night! Group is locked. See you tomorrow!"
-    })
-
-def save_speeches(speeches):
-    save_json(SPEECH_FILE, speeches)
-
-# ============ GIFS ============
-def load_gifs():
-    return load_json(GIFS_FILE, {})
-
-def save_gifs(gifs):
-    save_json(GIFS_FILE, gifs)
-
-def add_gif(name, file_id):
-    gifs = load_gifs()
-    gifs[name.lower()] = file_id
-    save_gifs(gifs)
-    return True
-
-def get_gif(name):
-    gifs = load_gifs()
-    return gifs.get(name.lower(), None)
-
-def list_gifs():
-    gifs = load_gifs()
-    return list(gifs.keys())
-
-# ============ DEAL FORM ============
-def parse_deal_form(text):
-    patterns = {
-        'amount': r'𝘿𝙀𝘼𝙇 𝘼𝙈𝙊𝙐𝙉𝙏\s*[:=]\s*([^\n]+)',
-        'buyer': r'𝘽𝙐𝙔𝙀𝙍𝙎?\s*[:=]\s*@([^\s\n]+)',
-        'seller': r'𝙎𝙀𝙇𝙇𝙀𝙍\s*[:=]\s*@([^\s\n]+)',
-        'deal_detail': r'𝘿𝙀𝘼𝙇 𝘿𝙀𝙏𝘼𝙄𝙇\s*[:=]\s*([^\n]+)',
-        'rls_upi': r'𝙍𝙇𝙎 𝙐𝙋𝙄\s*[:=]\s*([^\n]+)',
-        'condition': r'𝘾𝙊𝙉𝘿𝙄𝙏𝙄𝙊𝙉\s*[:=]\s*([^\n]+)',
-        'escrow_till': r'𝙀𝙎𝘾𝙍𝙊𝙒 𝙏𝙄𝙇𝙇\s*[:=]\s*([^\n]+)'
-    }
-    
-    result = {}
-    for key, pattern in patterns.items():
-        match = re.search(pattern, text, re.IGNORECASE)
-        result[key] = match.group(1).strip() if match else "N/A"
-    return result
-
-def is_valid_deal_form(text):
-    has_buyer = re.search(r'𝘽𝙐𝙔𝙀𝙍𝙎?\s*[:=]\s*@', text, re.IGNORECASE)
-    has_seller = re.search(r'𝙎𝙀𝙇𝙇𝙀𝙍\s*[:=]\s*@', text, re.IGNORECASE)
-    has_amount = re.search(r'𝘿𝙀𝘼𝙇 𝘼𝙈𝙊𝙐𝙉𝙏\s*[:=]', text, re.IGNORECASE)
-    return (has_buyer or has_seller) and has_amount
 
 # ============ COMMANDS ============
 
-async def start_command(update, context):
-    user_id = update.effective_user.id
-    username = update.effective_user.username or "Unknown"
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    uid = user.id
+    register_user(uid, user.username, user.first_name)
     
-    try:
-        await context.bot.get_chat_member(GROUP_ID, user_id)
-    except:
+    if update.effective_chat.type == "private":
+        fancy_name = to_fancy(user.first_name)
+        buttons = [[InlineKeyboardButton("🔹 JOIN GROUP 🔹", url=JOIN_GROUP_LINK)]]
         msg = f"""
-⚠️ <b>JOIN GROUP FIRST!</b>
+👋 𝐖𝐄𝐋𝐂𝐎𝐌𝐄 {fancy_name}
 ━━━━━━━━━━━━━━━━━━
-Please join our group to use this bot:
-{JOIN_GROUP_LINK}
+𝐉𝐨𝐢𝐧 𝐨𝐮𝐫 𝐠𝐫𝐨𝐮𝐩 𝐟𝐢𝐫𝐬𝐭 𝐭𝐨 𝐮𝐬𝐞 𝐭𝐡𝐞 𝐛𝐨𝐭:
+👉 {JOIN_GROUP_LINK}
 ━━━━━━━━━━━━━━━━━━
-        """
-        await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
+𝐓𝐡𝐢𝐬 𝐛𝐨𝐭 𝐢𝐬 𝐟𝐨𝐫:
+• 𝙆𝘼𝙇𝙔𝙐𝙂 𝙀𝙎𝘾𝙍𝙊𝙒 𝘿𝙀𝘼𝙇 𝙁𝙊𝙍𝙈
+• 𝐃𝐞𝐚𝐥 𝐌𝐚𝐧𝐚𝐠𝐞𝐦𝐞𝐧𝐭
+• 𝐆𝐫𝐨𝐮𝐩 𝐋𝐨𝐜𝐤/𝐔𝐧𝐥𝐨𝐜𝐤
+• 𝐃𝐢𝐜𝐞 𝐆𝐚𝐦𝐞
+━━━━━━━━━━━━━━━━━━
+"""
+        await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+    
+    await update.message.reply_text(f"𝐁𝐨𝐭 𝐢𝐬 𝐚𝐜𝐭𝐢𝐯𝐞!", parse_mode="HTML")
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    
+    if update.effective_chat.type == "private" and not is_admin_user(uid) and not is_owner_user(uid):
+        buttons = [[InlineKeyboardButton("🔹 JOIN GROUP 🔹", url=JOIN_GROUP_LINK)]]
+        await update.message.reply_text(
+            f"𝐏𝐥𝐞𝐚𝐬𝐞 𝐣𝐨𝐢𝐧 𝐭𝐡𝐞 𝐠𝐫𝐨𝐮𝐩 𝐟𝐢𝐫𝐬𝐭:\n{JOIN_GROUP_LINK}",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
         return
     
     msg = f"""
-🔥 <b>𝙆𝘼𝙇𝙔𝙐𝙂 𝙀𝙎𝘾𝙍𝙊𝙒 𝘿𝙀𝘼𝙇 𝘽𝙊𝙏</b>
+𝐊𝐀𝐋𝐘𝐔𝐆 𝐄𝐒𝐂𝐑𝐎𝐖 𝐁𝐎𝐓 - 𝐇𝐄𝐋𝐏
 ━━━━━━━━━━━━━━━━━━
-👋 Hey @{username}!
-
-🔹 <b>Commands:</b>
-/start - Start bot
-/help - Help menu
-/time - Bot time
-/lock - Lock group
-/unlock - Unlock group
-/admins - List admins
-/broadcast - Send broadcast
-/send - Send to group
-/dice - Play dice
-/check DEAL_ID - Check deal
-/gif NAME - Send GIF
-
-👑 <b>Owner Commands:</b>
-/approve USER_ID - Add admin
-/removeadmin USER_ID - Remove admin
-/setlock HH:MM - Set lock time
-/setunlock HH:MM - Set unlock time
-/setmorning SPEECH - Set morning speech
-/setnight SPEECH - Set night speech
-/addgif NAME - Reply to GIF to add
-/listgifs - List all GIFs
-
+𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒:
+/start - 𝐒𝐭𝐚𝐫𝐭 𝐛𝐨𝐭
+/help - 𝐓𝐡𝐢𝐬 𝐦𝐞𝐧𝐮
+/time - 𝐒𝐡𝐨𝐰 𝐜𝐮𝐫𝐫𝐞𝐧𝐭 𝐛𝐨𝐭 𝐭𝐢𝐦𝐞
 ━━━━━━━━━━━━━━━━━━
-🔥 @𝙆𝘼𝙇𝙔𝙐𝙂𝙀𝙎𝘾𝙍𝙊𝙒𝙎𝙀𝙍𝙑𝙄𝘾𝙀
+𝐀𝐃𝐌𝐈𝐍 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒:
+/lock - 𝐋𝐨𝐜𝐤 𝐠𝐫𝐨𝐮𝐩
+/unlock - 𝐔𝐧𝐥𝐨𝐜𝐤 𝐠𝐫𝐨𝐮𝐩
+/setlock 𝐇𝐇:𝐌𝐌 - 𝐀𝐮𝐭𝐨 𝐥𝐨𝐜𝐤
+/setunlock 𝐇𝐇:𝐌𝐌 - 𝐀𝐮𝐭𝐨 𝐮𝐧𝐥𝐨𝐜𝐤
+/setspeech 𝐭𝐞𝐱𝐭 - 𝐒𝐞𝐭 𝐦𝐨𝐫𝐧𝐢𝐧𝐠 𝐬𝐩𝐞𝐞𝐜𝐡
+/broadcast 𝐦𝐬𝐠 - 𝐁𝐫𝐨𝐚𝐝𝐜𝐚𝐬𝐭
+/send - 𝐒𝐞𝐧𝐝 𝐩𝐡𝐨𝐭𝐨/𝐟𝐢𝐥𝐞
+/check 𝐃𝐄𝐀𝐋_𝐈𝐃 - 𝐂𝐡𝐞𝐜𝐤 𝐝𝐞𝐚𝐥
+/approve 𝐔𝐈𝐃 - 𝐀𝐩𝐩𝐫𝐨𝐯𝐞 𝐚𝐝𝐦𝐢𝐧
+/removeadmin 𝐔𝐈𝐃 - 𝐑𝐞𝐦𝐨𝐯𝐞 𝐚𝐝𝐦𝐢𝐧
+/admins - 𝐋𝐢𝐬𝐭 𝐚𝐝𝐦𝐢𝐧𝐬
+/dice - 𝐃𝐢𝐜𝐞 𝐆𝐚𝐦𝐞
+/owner - 𝐎𝐰𝐧𝐞𝐫 𝐩𝐚𝐧𝐞𝐥
 ━━━━━━━━━━━━━━━━━━
-    """
-    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
+"""
+    await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML")
 
-async def help_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
-        return
-    
-    msg = f"""
-❓ <b>𝙃𝙀𝙇𝙋 𝙈𝙀𝙉𝙐</b>
-━━━━━━━━━━━━━━━━━━
-
-🔹 <b>User Commands:</b>
-/start - Start bot
-/help - This menu
-/time - Bot time
-
-🔹 <b>Admin Commands:</b>
-/lock - Lock group
-/unlock - Unlock group
-/admins - List admins
-/broadcast - Send broadcast
-/send - Send to group
-/dice - Play dice
-/check DEAL_ID - Check deal
-/gif NAME - Send GIF
-
-👑 <b>Owner Commands:</b>
-/approve USER_ID - Add admin
-/removeadmin USER_ID - Remove admin
-/setlock HH:MM - Set lock time
-/setunlock HH:MM - Set unlock time
-/setmorning SPEECH - Set morning speech
-/setnight SPEECH - Set night speech
-/addgif NAME - Reply to GIF to add
-/listgifs - List all GIFs
-
-━━━━━━━━━━━━━━━━━━
-🔥 @𝙆𝘼𝙇𝙔𝙐𝙂𝙀𝙎𝘾𝙍𝙊𝙒𝙎𝙀𝙍𝙑𝙄𝘾𝙀
-━━━━━━━━━━━━━━━━━━
-    """
-    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
-
-async def time_command(update, context):
+async def time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
-    settings = load_settings()
-    
+    current_time = now.strftime("%I:%M:%S %p")
+    current_date = now.strftime("%d %B %Y")
     msg = f"""
-🕐 <b>𝘽𝙊𝙏 𝙏𝙄𝙈𝙀</b>
+𝐁𝐎𝐓 𝐓𝐈𝐌𝐄
 ━━━━━━━━━━━━━━━━━━
-📅 Date: {now.strftime('%Y-%m-%d')}
-🕐 Time: {now.strftime('%H:%M:%S')}
-📌 Day: {now.strftime('%A')}
-
-⏰ <b>𝙎𝘾𝙃𝙀𝘿𝙐𝙇𝙀</b>
-🔒 Lock Time: {settings.get('lock_time', '19:30')}
-🔓 Unlock Time: {settings.get('unlock_time', '07:00')}
-🔐 Status: {'🔒 LOCKED' if settings.get('group_locked', False) else '🔓 UNLOCKED'}
-
+𝐃𝐚𝐭𝐞: {to_fancy(current_date)}
+𝐓𝐢𝐦𝐞: {to_fancy(current_time)}
+𝐓𝐢𝐦𝐞𝐳𝐨𝐧𝐞: 𝐈𝐒𝐓 (𝐔𝐓𝐂+𝟓:𝟑𝟎)
 ━━━━━━━━━━━━━━━━━━
-    """
-    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
+"""
+    await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML")
 
-async def lock_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def lock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid) and not is_owner_user(uid):
+        await update.message.reply_text(f"𝐀𝐝𝐦𝐢𝐧 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
     
-    settings = load_settings()
-    settings['group_locked'] = True
-    save_settings(settings)
-    
-    speech = load_speeches().get('night', '🌙 Good Night! Group is locked.')
-    
-    await update.message.reply_text("🔒 Group locked!")
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        text=format_with_emojis(speech),
-        parse_mode="HTML"
-    )
+    chat_id = update.effective_chat.id
+    try:
+        permissions = {
+            "can_send_messages": False,
+            "can_send_media_messages": False,
+            "can_send_polls": False,
+            "can_send_other_messages": False,
+            "can_add_web_page_previews": False,
+            "can_change_info": False,
+            "can_invite_users": False,
+            "can_pin_messages": False
+        }
+        await context.bot.set_chat_permissions(chat_id, permissions)
+        config["locked"] = True
+        save_json(CONFIG_FILE, config)
+        
+        speech = config.get("morning_speech", "")
+        msg = f"""
+🔒 𝐆𝐑𝐎𝐔𝐏 𝐈𝐒 𝐋𝐎𝐂𝐊𝐄𝐃 🔒
+━━━━━━━━━━━━━━━━━━
+𝐆𝐫𝐨𝐮𝐩 𝐡𝐚𝐬 𝐛𝐞𝐞𝐧 𝐥𝐨𝐜𝐤𝐞𝐝 𝐛𝐲 𝐚𝐝𝐦𝐢𝐧!
+𝐎𝐧𝐥𝐲 𝐚𝐝𝐦𝐢𝐧𝐬 𝐜𝐚𝐧 𝐬𝐞𝐧𝐝 𝐦𝐞𝐬𝐬𝐚𝐠𝐞𝐬 𝐧𝐨𝐰.
+━━━━━━━━━━━━━━━━━━
+"""
+        if speech:
+            msg += f"\n{speech}\n━━━━━━━━━━━━━━━━━━\n"
+        
+        await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"𝐄𝐫𝐫𝐨𝐫: {str(e)}", parse_mode="HTML")
 
-async def unlock_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def unlock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid) and not is_owner_user(uid):
+        await update.message.reply_text(f"𝐀𝐝𝐦𝐢𝐧 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
     
-    settings = load_settings()
-    settings['group_locked'] = False
-    save_settings(settings)
-    
-    speech = load_speeches().get('morning', '🌅 Good Morning! New day, new deals!')
-    
-    await update.message.reply_text("🔓 Group unlocked!")
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        text=format_with_emojis(speech),
-        parse_mode="HTML"
-    )
+    chat_id = update.effective_chat.id
+    try:
+        permissions = {
+            "can_send_messages": True,
+            "can_send_media_messages": True,
+            "can_send_polls": True,
+            "can_send_other_messages": True,
+            "can_add_web_page_previews": True,
+            "can_change_info": False,
+            "can_invite_users": True,
+            "can_pin_messages": False
+        }
+        await context.bot.set_chat_permissions(chat_id, permissions)
+        config["locked"] = False
+        save_json(CONFIG_FILE, config)
+        
+        msg = f"""
+🔓 𝐆𝐑𝐎𝐔𝐏 𝐈𝐒 𝐔𝐍𝐋𝐎𝐂𝐊𝐄𝐃 🔓
+━━━━━━━━━━━━━━━━━━
+𝐆𝐫𝐨𝐮𝐩 𝐡𝐚𝐬 𝐛𝐞𝐞𝐧 𝐮𝐧𝐥𝐨𝐜𝐤𝐞𝐝!
+𝐄𝐯𝐞𝐫𝐲𝐨𝐧𝐞 𝐜𝐚𝐧 𝐬𝐞𝐧𝐝 𝐦𝐞𝐬𝐬𝐚𝐠𝐞𝐬 𝐧𝐨𝐰.
+━━━━━━━━━━━━━━━━━━
+"""
+        await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"𝐄𝐫𝐫𝐨𝐫: {str(e)}", parse_mode="HTML")
 
-async def set_lock_time(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def setlock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid) and not is_admin_user(uid):
+        await update.message.reply_text(f"𝐀𝐝𝐦𝐢𝐧 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/setlock HH:MM`", parse_mode="Markdown")
+    if not context.args:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /setlock 𝐇𝐇:𝐌𝐌", parse_mode="HTML")
         return
-    
     time_str = context.args[0]
     try:
-        datetime.strptime(time_str, '%H:%M')
-        settings = load_settings()
-        settings['lock_time'] = time_str
-        save_settings(settings)
-        await update.message.reply_text(f"✅ Lock time set to {time_str}")
-    except ValueError:
-        await update.message.reply_text("❌ Invalid format! Use HH:MM")
+        hour, minute = map(int, time_str.split(':'))
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError
+        config["lock_time"] = f"{hour:02d}:{minute:02d}"
+        save_json(CONFIG_FILE, config)
+        await update.message.reply_text(f"𝐀𝐮𝐭𝐨-𝐥𝐨𝐜𝐤 𝐬𝐞𝐭 𝐟𝐨𝐫 {to_fancy(time_str)}", parse_mode="HTML")
+    except:
+        await update.message.reply_text(f"𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐭𝐢𝐦𝐞! 𝐔𝐬𝐞 𝐇𝐇:𝐌𝐌", parse_mode="HTML")
 
-async def set_unlock_time(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def setunlock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid) and not is_admin_user(uid):
+        await update.message.reply_text(f"𝐀𝐝𝐦𝐢𝐧 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/setunlock HH:MM`", parse_mode="Markdown")
+    if not context.args:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /setunlock 𝐇𝐇:𝐌𝐌", parse_mode="HTML")
         return
-    
     time_str = context.args[0]
     try:
-        datetime.strptime(time_str, '%H:%M')
-        settings = load_settings()
-        settings['unlock_time'] = time_str
-        save_settings(settings)
-        await update.message.reply_text(f"✅ Unlock time set to {time_str}")
-    except ValueError:
-        await update.message.reply_text("❌ Invalid format! Use HH:MM")
+        hour, minute = map(int, time_str.split(':'))
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError
+        config["unlock_time"] = f"{hour:02d}:{minute:02d}"
+        save_json(CONFIG_FILE, config)
+        await update.message.reply_text(f"𝐀𝐮𝐭𝐨-𝐮𝐧𝐥𝐨𝐜𝐤 𝐬𝐞𝐭 𝐟𝐨𝐫 {to_fancy(time_str)}", parse_mode="HTML")
+    except:
+        await update.message.reply_text(f"𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐭𝐢𝐦𝐞! 𝐔𝐬𝐞 𝐇𝐇:𝐌𝐌", parse_mode="HTML")
 
-async def set_morning_speech(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def setspeech_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid) and not is_admin_user(uid):
+        await update.message.reply_text(f"𝐀𝐝𝐦𝐢𝐧 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/setmorning your speech here`", parse_mode="Markdown")
+    if not context.args:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /setspeech 𝐲𝐨𝐮𝐫 𝐬𝐩𝐞𝐞𝐜𝐡", parse_mode="HTML")
         return
-    
     speech = " ".join(context.args)
-    speeches = load_speeches()
-    speeches['morning'] = speech
-    save_speeches(speeches)
-    await update.message.reply_text("✅ Morning speech updated!")
+    config["morning_speech"] = speech
+    save_json(CONFIG_FILE, config)
+    await update.message.reply_text(f"𝐌𝐨𝐫𝐧𝐢𝐧𝐠 𝐬𝐩𝐞𝐞𝐜𝐡 𝐬𝐞𝐭!\n━━━━━━━━━━━━━━━━━━\n{speech}\n━━━━━━━━━━━━━━━━━━", parse_mode="HTML")
 
-async def set_night_speech(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid) and not is_admin_user(uid):
+        await update.message.reply_text(f"𝐀𝐝𝐦𝐢𝐧 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/setnight your speech here`", parse_mode="Markdown")
+    if not context.args and not update.message.reply_to_message:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /broadcast 𝐦𝐞𝐬𝐬𝐚𝐠𝐞", parse_mode="HTML")
         return
-    
-    speech = " ".join(context.args)
-    speeches = load_speeches()
-    speeches['night'] = speech
-    save_speeches(speeches)
-    await update.message.reply_text("✅ Night speech updated!")
-
-async def broadcast_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
-        return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/broadcast your message here`", parse_mode="Markdown")
-        return
-    
-    msg = " ".join(context.args)
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        text=format_with_emojis(f"""
-📢 <b>𝘽𝙍𝙊𝘼𝘿𝘾𝘼𝙎𝙏</b>
-━━━━━━━━━━━━━━━━━━
-{msg}
-━━━━━━━━━━━━━━━━━━
-        """),
-        parse_mode="HTML"
-    )
-    await update.message.reply_text("✅ Broadcast sent!")
-
-async def send_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
-        return
-    
     if update.message.reply_to_message:
-        msg = update.message.reply_to_message
-        
-        if msg.text:
-            await context.bot.send_message(
-                chat_id=GROUP_ID,
-                text=format_with_emojis(msg.text),
-                parse_mode="HTML"
-            )
-        elif msg.photo:
-            await context.bot.send_photo(
-                chat_id=GROUP_ID,
-                photo=msg.photo[-1].file_id,
-                caption=format_with_emojis(msg.caption) if msg.caption else ""
-            )
-        elif msg.animation:
-            await context.bot.send_animation(
-                chat_id=GROUP_ID,
-                animation=msg.animation.file_id,
-                caption=format_with_emojis(msg.caption) if msg.caption else ""
-            )
-        elif msg.video:
-            await context.bot.send_video(
-                chat_id=GROUP_ID,
-                video=msg.video.file_id,
-                caption=format_with_emojis(msg.caption) if msg.caption else ""
-            )
-        elif msg.document:
-            await context.bot.send_document(
-                chat_id=GROUP_ID,
-                document=msg.document.file_id,
-                caption=format_with_emojis(msg.caption) if msg.caption else ""
-            )
-        else:
-            await update.message.reply_text("❌ Unsupported media type!")
-            return
-        
-        await update.message.reply_text("✅ Sent to group!")
-        return
-    
-    if context.args:
-        text = " ".join(context.args)
-        await context.bot.send_message(
-            chat_id=GROUP_ID,
-            text=format_with_emojis(text),
-            parse_mode="HTML"
-        )
-        await update.message.reply_text("✅ Sent to group!")
-        return
-    
-    await update.message.reply_text("📝 Reply to a message with /send to forward it.")
-
-async def dice_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
-        return
-    
-    # Try to send GIF if exists
-    gif = get_gif('dice')
-    if gif:
-        await update.message.reply_animation(
-            gif,
-            caption="🎲 <b>ROLLING...</b>",
-            parse_mode="HTML"
-        )
-        await asyncio.sleep(1.5)
-    
-    result = random.randint(1, 6)
-    win = result >= 4
-    
-    msg = f"""
-🎲 <b>𝘿𝙄𝘾𝙀 𝙂𝘼𝙈𝙀</b>
-━━━━━━━━━━━━━━━━━━
-🎯 Result: <b>{result}</b>
-{'🎉 YOU WIN!' if win else '😢 YOU LOSE!'}
-━━━━━━━━━━━━━━━━━━
-    """
-    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
-
-async def add_gif_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
-        return
-    
-    if not update.message.reply_to_message or not update.message.reply_to_message.animation:
-        await update.message.reply_text(
-            "📝 Reply to a GIF with `/addgif NAME`\n"
-            "Example: Reply to GIF with `/addgif dice`",
-            parse_mode="Markdown"
-        )
-        return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: Reply to GIF with `/addgif NAME`", parse_mode="Markdown")
-        return
-    
-    name = context.args[0].lower()
-    gif = update.message.reply_to_message.animation
-    add_gif(name, gif.file_id)
-    await update.message.reply_text(f"✅ GIF '{name}' added successfully!")
-
-async def gif_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
-        return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/gif NAME`", parse_mode="Markdown")
-        return
-    
-    name = context.args[0].lower()
-    gif = get_gif(name)
-    
-    if gif:
-        await update.message.reply_animation(gif)
+        text = update.message.reply_to_message.text or update.message.reply_to_message.caption or ""
     else:
-        await update.message.reply_text(f"❌ GIF '{name}' not found!")
+        text = " ".join(context.args)
+    if not text:
+        await update.message.reply_text(f"𝐍𝐨 𝐦𝐞𝐬𝐬𝐚𝐠𝐞!", parse_mode="HTML")
+        return
+    broadcast_msg = f"""
+📢 𝐁𝐑𝐎𝐀𝐃𝐂𝐀𝐒𝐓 📢
+━━━━━━━━━━━━━━━━━━
+{text}
+━━━━━━━━━━━━━━━━━━
+"""
+    await context.bot.send_message(chat_id=GROUP_ID, text=wrap_with_emojis(broadcast_msg), parse_mode="HTML")
+    await update.message.reply_text(f"𝐁𝐫𝐨𝐚𝐝𝐜𝐚𝐬𝐭 𝐬𝐞𝐧𝐭! ✅", parse_mode="HTML")
 
-async def list_gifs_command(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def send_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid) and not is_admin_user(uid):
+        await update.message.reply_text(f"𝐀𝐝𝐦𝐢𝐧 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
-    
-    gif_list = list_gifs()
-    if not gif_list:
-        await update.message.reply_text("📭 No GIFs added yet!")
+    if update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo = update.message.reply_to_message.photo[-1].file_id
+        caption = " ".join(context.args) if context.args else None
+        await context.bot.send_photo(chat_id=GROUP_ID, photo=photo, caption=caption)
+        await update.message.reply_text(f"𝐏𝐡𝐨𝐭𝐨 𝐬𝐞𝐧𝐭 𝐭𝐨 𝐠𝐫𝐨𝐮𝐩! ✅", parse_mode="HTML")
         return
-    
-    msg = "🎬 <b>GIF LIST</b>\n━━━━━━━━━━━━━━━━━━\n\n"
-    for name in gif_list:
-        msg += f"🔹 {name}\n"
-    msg += "━━━━━━━━━━━━━━━━━━\n💡 Use /gif NAME to send"
-    
-    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
-
-async def check_deal(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+    if not context.args:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /send 𝐭𝐞𝐱𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐨𝐫 𝐫𝐞𝐩𝐥𝐲 𝐭𝐨 𝐩𝐡𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝", parse_mode="HTML")
         return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/check DEAL_ID`", parse_mode="Markdown")
-        return
-    
-    deal_id = context.args[0]
-    deal = get_deal(deal_id)
-    
-    if not deal:
-        await update.message.reply_text(f"❌ Deal '{deal_id}' not found!")
-        return
-    
+    text = " ".join(context.args)
     msg = f"""
-📋 <b>𝘿𝙀𝘼𝙇 𝘿𝙀𝙏𝘼𝙄𝙇𝙎</b>
+📢 𝐅𝐑𝐎𝐌 𝐀𝐃𝐌𝐈𝐍 📢
 ━━━━━━━━━━━━━━━━━━
-📋 <b>𝙳𝙴𝙰𝙻 𝙸𝙳:</b> <code>{deal_id}</code>
+{text}
 ━━━━━━━━━━━━━━━━━━
-💰 <b>𝘿𝙀𝘼𝙇 𝘼𝙈𝙊𝙐𝙉𝙏:</b> {to_fancy(deal.get('amount', 'N/A'))}
-👤 <b>𝘽𝙐𝙔𝙀𝙍:</b> @{to_fancy(deal.get('buyer', 'N/A'))}
-👤 <b>𝙎𝙀𝙇𝙇𝙀𝙍:</b> @{to_fancy(deal.get('seller', 'N/A'))}
-📝 <b>𝘿𝙀𝘼𝙇 𝘿𝙀𝙏𝘼𝙄𝙇:</b> {to_fancy(deal.get('deal_detail', 'N/A'))}
-💳 <b>𝙍𝙇𝙎 𝙐𝙋𝙄:</b> {to_fancy(deal.get('rls_upi', 'N/A'))}
-📌 <b>𝘾𝙊𝙉𝘿𝙄𝙏𝙄𝙊𝙉:</b> {to_fancy(deal.get('condition', 'N/A'))}
-⏰ <b>𝙀𝙎𝘾𝙍𝙊𝙒 𝙏𝙄𝙇𝙇:</b> {to_fancy(deal.get('escrow_till', 'N/A'))}
-━━━━━━━━━━━━━━━━━━
-📌 <b>𝙎𝙏𝘼𝙏𝙐𝙎:</b> {to_fancy(deal.get('status', 'UNKNOWN'))}
-📅 <b>𝘾𝙍𝙀𝘼𝙏𝙀𝘿:</b> {deal.get('date', 'N/A')}
-━━━━━━━━━━━━━━━━━━
-    """
-    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
+"""
+    await context.bot.send_message(chat_id=GROUP_ID, text=wrap_with_emojis(msg), parse_mode="HTML")
+    await update.message.reply_text(f"𝐌𝐞𝐬𝐬𝐚𝐠𝐞 𝐬𝐞𝐧𝐭! ✅", parse_mode="HTML")
 
-async def approve_admin(update, context):
-    if not is_owner(update.effective_user.id):
-        await update.message.reply_text("❌ Owner only!")
+async def approve_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        await update.message.reply_text(f"𝐎𝐰𝐧𝐞𝐫 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/approve USER_ID`", parse_mode="Markdown")
+    if not context.args:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /approve 𝐔𝐒𝐄𝐑_𝐈𝐃", parse_mode="HTML")
         return
-    
-    try:
-        user_id = int(context.args[0])
-        if add_admin(user_id):
-            await update.message.reply_text(f"✅ User {user_id} is now an admin!")
-        else:
-            await update.message.reply_text(f"⚠️ User {user_id} is already an admin!")
-    except ValueError:
-        await update.message.reply_text("❌ Invalid user ID!")
+    target_id = context.args[0].strip()
+    if target_id in admins_data.get("approved", []):
+        await update.message.reply_text(f"𝐀𝐥𝐫𝐞𝐚𝐝𝐲 𝐚𝐧 𝐚𝐝𝐦𝐢𝐧!", parse_mode="HTML")
+        return
+    admins_data.setdefault("approved", []).append(target_id)
+    save_json(ADMINS_FILE, admins_data)
+    await update.message.reply_text(
+        f"✅ 𝐀𝐃𝐌𝐈𝐍 𝐀𝐏𝐏𝐑𝐎𝐕𝐄𝐃 ✅\n━━━━━━━━━━━━━━━━━━\n𝐔𝐬𝐞𝐫 𝐈𝐃: {to_fancy(target_id)}\n𝐍𝐨𝐰 𝐭𝐡𝐢𝐬 𝐮𝐬𝐞𝐫 𝐢𝐬 𝐚𝐧 𝐚𝐝𝐦𝐢𝐧!\n━━━━━━━━━━━━━━━━━━",
+        parse_mode="HTML"
+    )
 
-async def remove_admin(update, context):
-    if not is_owner(update.effective_user.id):
-        await update.message.reply_text("❌ Owner only!")
+async def removeadmin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        await update.message.reply_text(f"𝐎𝐰𝐧𝐞𝐫 𝐨𝐧𝐥𝐲!", parse_mode="HTML")
         return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("📝 Usage: `/removeadmin USER_ID`", parse_mode="Markdown")
+    if not context.args:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /removeadmin 𝐔𝐒𝐄𝐑_𝐈𝐃", parse_mode="HTML")
         return
-    
-    try:
-        user_id = int(context.args[0])
-        if remove_admin(user_id):
-            await update.message.reply_text(f"✅ User {user_id} removed from admins!")
-        else:
-            await update.message.reply_text(f"⚠️ User {user_id} is not an admin or is owner!")
-    except ValueError:
-        await update.message.reply_text("❌ Invalid user ID!")
+    target_id = context.args[0].strip()
+    if target_id == str(OWNER_ID):
+        await update.message.reply_text(f"𝐂𝐚𝐧𝐧𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐫𝐞𝐦𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐞𝐫!", parse_mode="HTML")
+        return
+    if target_id not in admins_data.get("approved", []):
+        await update.message.reply_text(f"𝐍𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐚𝐧 𝐚𝐝𝐦𝐢𝐧!", parse_mode="HTML")
+        return
+    admins_data["approved"].remove(target_id)
+    save_json(ADMINS_FILE, admins_data)
+    await update.message.reply_text(
+        f"❌ 𝐀𝐃𝐌𝐈𝐍 𝐑𝐄𝐌𝐎𝐕𝐄𝐃 ❌\n━━━━━━━━━━━━━━━━━━\n𝐔𝐬𝐞𝐫 𝐈𝐃: {to_fancy(target_id)}\n━━━━━━━━━━━━━━━━━━",
+        parse_mode="HTML"
+    )
 
-async def list_admins(update, context):
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Admin only!")
+async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(f"𝐔𝐬𝐚𝐠𝐞: /check 𝐃𝐄𝐀𝐋_𝐈𝐃", parse_mode="HTML")
         return
-    
-    admins = load_admins()
-    msg = "👑 <b>ADMINS LIST</b>\n━━━━━━━━━━━━━━━━━━\n\n"
-    for admin_id in admins:
-        if admin_id == OWNER_ID:
-            msg += f"👑 {admin_id} (Owner)\n"
-        else:
-            msg += f"⚡ {admin_id}\n"
+    deal_id = context.args[0].strip().upper()
+    if deal_id in deals:
+        deal = deals[deal_id]
+        msg = f"""
+📋 𝐃𝐄𝐀𝐋 𝐅𝐎𝐔𝐍𝐃 📋
+━━━━━━━━━━━━━━━━━━
+🆔 <code>{deal_id}</code>
+💰 𝐀𝐦𝐨𝐮𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {deal.get('deal_amount', '𝐍/𝐀')}
+👤 𝐁𝐮𝐲𝐞𝐫: {deal.get('buyers', '𝐍/𝐀')}
+👤 𝐒𝐞𝐥𝐥𝐞𝐫: {deal.get('seller', '𝐍/𝐀')}
+📝 𝐃𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐥: {deal.get('deal_detail', '𝐍/𝐀')}
+⏰ 𝐄𝐬𝐜𝐫𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐓𝐢𝐥𝐥: {deal.get('escrow_till', '𝐍/𝐀')}
+📅 𝐂𝐫𝐞𝐚𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐝: {deal.get('created_at', '𝐍/𝐀')}
+━━━━━━━━━━━━━━━━━━
+"""
+        await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML")
+    else:
+        await update.message.reply_text(f"𝐃𝐞𝐚𝐥 '{deal_id}' 𝐧𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐟𝐨𝐮𝐧𝐝!", parse_mode="HTML")
+
+async def dice_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("🎲 𝐒𝐄𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐆𝐈𝐅 🎲", callback_data="set_gif")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        f"𝐃𝐈𝐂𝐄 𝐆𝐀𝐌𝐄\n━━━━━━━━━━━━━━━━━━\n𝐂𝐥𝐢𝐜𝐤 𝐛𝐞𝐥𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐨 𝐬𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐚 𝐆𝐈𝐅!\n𝐒𝐞𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐦𝐞 𝐚 𝐆𝐈𝐅 𝐰𝐢𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐡 𝐤𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐨𝐫𝐝",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+
+async def owner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner_user(update.effective_user.id):
+        await update.message.reply_text(f"𝐎𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐞𝐫 𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐥𝐲!", parse_mode="HTML")
+        return
+    total_users = len(users)
+    total_deals = len(deals)
+    total_admins = len(admins_data.get("approved", []))
+    lock_status = "🔒 𝐋𝐨𝐜𝐤𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝" if config.get("locked") else "🔓 𝐔𝐧𝐥𝐨𝐜𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝"
+    msg = f"""
+👑 𝐎𝐖𝐍𝐄𝐑 𝐏𝐀𝐍𝐄𝐋 👑
+━━━━━━━━━━━━━━━━━━
+📊 𝐒𝐓𝐀𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃𝐒𝐓𝐈𝐂𝐒:
+👥 𝐔𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐞𝐫𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {total_users}
+📋 𝐃𝐞𝐚𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {total_deals}
+🛡️ 𝐀𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐦𝐢𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {total_admins}
+🔐 𝐆𝐫𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {lock_status}
+━━━━━━━━━━━━━━━━━━
+📌 𝐂𝐎𝐌𝐌𝐀𝐍𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃𝐒:
+🔹 /lock
+🔹 /unlock
+🔹 /setlock 𝐇𝐇:𝐌𝐌
+🔹 /setunlock 𝐇𝐇:𝐌𝐌
+🔹 /setspeech
+🔹 /broadcast
+🔹 /approve 𝐈𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃
+🔹 /removeadmin 𝐈𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃
+🔹 /check 𝐃𝐄𝐀𝐋_𝐈𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃
+🔹 /time
+━━━━━━━━━━━━━━━━━━
+⏰ 𝐋𝐨𝐜𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {config.get('lock_time', '𝐍𝐨𝐧𝐞')}
+⏰ 𝐔𝐧𝐥𝐨𝐜𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {config.get('unlock_time', '𝐍𝐨𝐧𝐞')}
+━━━━━━━━━━━━━━━━━━
+"""
+    await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML")
+
+async def admins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid) and not is_admin_user(uid):
+        await update.message.reply_text(f"𝐀𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐦𝐢𝐧 𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐥𝐲!", parse_mode="HTML")
+        return
+    admin_list = admins_data.get("approved", [])
+    msg = f"𝐀𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃𝐌𝐈𝐍 𝐋𝐈𝐒𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃\n━━━━━━━━━━━━━━━━━━\n"
+    for i, admin_id in enumerate(admin_list, 1):
+        owner_tag = " 👑" if admin_id == str(OWNER_ID) else ""
+        user_info = users.get(admin_id, {})
+        uname = user_info.get('username', '𝐍𝐨𝐧𝐞')
+        msg += f"{i}. 🆔 {admin_id}\n   @{uname}{owner_tag}\n\n"
     msg += "━━━━━━━━━━━━━━━━━━"
-    
-    await update.message.reply_text(format_with_emojis(msg), parse_mode="HTML")
+    await update.message.reply_text(wrap_with_emojis(msg), parse_mode="HTML")
 
-# ============ DEAL FORM HANDLER ============
-async def handle_deal_form(update, context):
-    user_id = update.effective_user.id
+# ============ CALLBACK ============
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "set_gif":
+        uid = update.effective_user.id
+        if not is_owner_user(uid) and not is_admin_user(uid):
+            await query.edit_message_text(f"𝐀𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐦𝐢𝐧 𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐥𝐲!", parse_mode="HTML")
+            return
+        context.user_data["awaiting_gif_keyword"] = True
+        await query.edit_message_text(
+            f"𝐒𝐄𝐍𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃 𝐆𝐈𝐅 𝐊𝐄𝐘𝐖𝐎𝐑𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐃\n━━━━━━━━━━━━━━━━━━\n𝐒𝐞𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝 𝐦𝐞 𝐚 𝐤𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝\n𝐄𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐞: 𝐁𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞",
+            parse_mode="HTML"
+        )
+
+# ============ DEAL FORM PARSER ============
+def parse_deal_form(text):
+    data = {}
+    text_upper = text.upper()
+    
+    # Extract fields
+    patterns = [
+        ("deal_amount", r'(?:DEAL|𝘿𝙀𝘼𝙇)\s*(?:AMOUNT|𝘼𝙈𝙊𝙐𝙉𝙏)\s*[:：\-]?\s*(.+?)(?:\n|$)', re.IGNORECASE),
+        ("buyers", r'(?:BUYERS|𝘽𝙐𝙔𝙀𝙍𝙎)\s*[:：\-]?\s*(.+?)(?:\n|$)', re.IGNORECASE),
+        ("seller", r'(?:SELLER|𝙎𝙀𝙇𝙇𝙀𝙍)\s*[:：\-]?\s*(.+?)(?:\n|$)', re.IGNORECASE),
+        ("deal_detail", r'(?:DEAL|𝘿𝙀𝘼𝙇)\s*(?:DETAIL|𝘿𝙀𝙏𝘼𝙄𝙇)\s*[:：\-]?\s*(.+?)(?:\n|$)', re.IGNORECASE),
+        ("rls_upi", r'(?:RLS|𝙍𝙇𝙎)\s*(?:UPI|𝙐𝙋𝙄)\s*[:：\-]?\s*(.+?)(?:\n|$)', re.IGNORECASE),
+        ("condition", r'(?:CONDITION|𝘾𝙊𝙉𝘿𝙄𝙏𝙄𝙊𝙉)\s*[:：\-]?\s*(.+?)(?:\n|$)', re.IGNORECASE),
+        ("escrow_till", r'(?:ESCROW|𝙀𝙎𝘾𝙍𝙊𝙒)\s*(?:TILL|𝙏𝙄𝙇𝙇)\s*[:：\-]?\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    ]
+    
+    for key, pattern, flags in patterns:
+        match = re.search(pattern, text, flags | re.DOTALL)
+        if match:
+            value = match.group(1).strip()
+            # Clean fancy text to normal
+            cleaned = ""
+            for ch in value:
+                if '\u1d400' <= ch <= '\u1d7ff':  # Mathematical bold range
+                    # Approximate mapping back
+                    if '𝐀' <= ch <= '𝐙':
+                        cleaned += chr(ord('A') + (ord(ch) - 0x1D400))
+                    elif '𝐚' <= ch <= '𝐳':
+                        cleaned += chr(ord('a') + (ord(ch) - 0x1D41A))
+                    elif '𝟎' <= ch <= '𝟗':
+                        cleaned += chr(ord('0') + (ord(ch) - 0x1D7CE))
+                    else:
+                        cleaned += ch
+                else:
+                    cleaned += ch
+            data[key] = cleaned.strip() if cleaned.strip() else value
+    
+    return data
+
+async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+    
     text = update.message.text
+    chat_id = update.effective_chat.id
     
-    if not is_valid_deal_form(text):
+    if chat_id != GROUP_ID:
         return
     
-    if not is_admin(user_id):
-        await update.message.reply_text(
-            format_with_emojis("❌ You are not authorized to create deals!\nContact owner for admin access.")
-        )
+    # Check for deal form
+    has_deal = '𝘿𝙀𝘼𝙇' in text or 'DEAL' in text.upper()
+    has_any_field = any(f in text for f in ['𝘼𝙈𝙊𝙐𝙉𝙏', '𝘽𝙐𝙔𝙀𝙍𝙎', '𝙎𝙀𝙇𝙇𝙀𝙍', '𝘿𝙀𝘼𝙇 𝘿𝙀𝙏𝘼𝙄𝙇', '𝙍𝙇𝙎', '𝘾𝙊𝙉𝘿𝙄𝙏𝙄𝙊𝙉', '𝙀𝙎𝘾𝙍𝙊𝙒', 'AMOUNT', 'BUYERS', 'SELLER'])
+    
+    if not (has_deal and has_any_field):
         return
     
-    deal_data = parse_deal_form(text)
+    data = parse_deal_form(text)
     
-    if deal_data['buyer'] == "N/A" and deal_data['seller'] == "N/A":
-        await update.message.reply_text(
-            format_with_emojis("❌ Please mention buyer or seller with @username!")
-        )
+    buyers = data.get('buyers', '').strip()
+    seller = data.get('seller', '').strip()
+    
+    if not buyers and not seller:
         return
     
-    deal_id = create_deal(deal_data)
+    deal_id = generate_deal_id()
     
-    msg = f"""
-🔥 <b>𝙉𝙀𝙒 𝘿𝙀𝘼𝙇 𝘾𝙍𝙀𝘼𝙏𝙀𝘿!</b>
+    deals[deal_id] = {
+        "deal_amount": data.get('deal_amount', '𝐍/𝐀'),
+        "buyers": buyers,
+        "seller": seller,
+        "deal_detail": data.get('deal_detail', '𝐍/𝐀'),
+        "rls_upi": data.get('rls_upi', '𝐍/𝐀'),
+        "condition": data.get('condition', '𝐍/𝐀'),
+        "escrow_till": data.get('escrow_till', '𝐍/𝐀'),
+        "created_at": datetime.now().strftime("%d-%m-%Y %I:%M %p"),
+        "created_by": update.effective_user.id
+    }
+    save_json(DEALS_FILE, deals)
+    
+    group_msg = f"""
+✅ 𝐃𝐄𝐀𝐋 𝐈𝐃 𝐂𝐑𝐄𝐀𝐓𝐄𝐃 ✅
 ━━━━━━━━━━━━━━━━━━
-📋 <b>𝙳𝙴𝙰𝙻 𝙸𝙳:</b> <code>{deal_id}</code>
-━━━━━━━━━━━━━━━━━━
-💰 <b>𝘿𝙀𝘼𝙇 𝘼𝙈𝙊𝙐𝙉𝙏:</b> {to_fancy(deal_data['amount'])}
-👤 <b>𝘽𝙐𝙔𝙀𝙍:</b> @{to_fancy(deal_data['buyer']) if deal_data['buyer'] != 'N/A' else 'N/A'}
-👤 <b>𝙎𝙀𝙇𝙇𝙀𝙍:</b> @{to_fancy(deal_data['seller']) if deal_data['seller'] != 'N/A' else 'N/A'}
-📝 <b>𝘿𝙀𝘼𝙇 𝘿𝙀𝙏𝘼𝙄𝙇:</b> {to_fancy(deal_data['deal_detail'])}
-💳 <b>𝙍𝙇𝙎 𝙐𝙋𝙄:</b> {to_fancy(deal_data['rls_upi'])}
-📌 <b>𝘾𝙊𝙉𝘿𝙄𝙏𝙄𝙊𝙉:</b> {to_fancy(deal_data['condition'])}
-⏰ <b>𝙀𝙎𝘾𝙍𝙊𝙒 𝙏𝙄𝙇𝙇:</b> {to_fancy(deal_data['escrow_till'])}
-━━━━━━━━━━━━━━━━━━
-📌 <b>𝙎𝙏𝘼𝙏𝙐𝙎:</b> {to_fancy('✅ ACTIVE')}
+🆔 <code>{deal_id}</code> (𝐓𝐚𝐩 𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐨 𝐜𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝𝐲)
+💰 𝐃𝐞𝐚𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐥 𝐀𝐦𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐝: {data.get('deal_amount', '𝐍/𝐀')}
+👤 𝐁𝐮𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐫: {buyers}
+👤 𝐒𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐫: {seller}
+📝 𝐃𝐞𝐚𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐥: {data.get('deal_detail', '𝐍/𝐀')}
+💳 𝐑𝐋𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐒 𝐔𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐈: {data.get('rls_upi', '𝐍/𝐀')}
+📋 𝐂𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐢𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧: {data.get('condition', '𝐍/𝐀')}
+⏰ 𝐄𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐜𝐫𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧: {data.get('escrow_till', '𝐍/𝐀')}
 ━━━━━━━━━━━━━━━━━━
 𝙀𝙎𝘾𝙍𝙊𝙒 𝙁𝙀𝙀𝙎 𝙄𝙎 𝙉𝙊𝙉 - 𝙍𝙀𝙁𝙐𝙉𝘿𝘼𝘽𝙇𝙀
-𝙉𝙊 𝙈𝘼𝙏𝙏𝙀𝙍 𝙄𝙁 𝙏𝙃𝙀 𝘿𝙀𝘼𝙇 𝙂𝙀𝙏𝙎 𝘾𝘼𝙉𝘾𝙀𝙇𝙇𝙀𝘿.
-
 𝙍𝙂 : @𝙆𝘼𝙇𝙔𝙐𝙂𝙀𝙎𝘾𝙍𝙊𝙒𝙎𝙀𝙍𝙑𝙄𝘾𝙀
 ━━━━━━━━━━━━━━━━━━
-    """
+"""
+    await update.message.reply_text(wrap_with_emojis(group_msg), parse_mode="HTML")
     
-    await context.bot.send_message(
-        chat_id=GROUP_ID,
-        text=format_with_emojis(msg),
-        parse_mode="HTML"
-    )
-    
-    for admin_id in load_admins():
+    # Send to all admins
+    for admin_id in admins_data.get("approved", []):
         try:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=format_with_emojis(f"""
-📨 <b>𝙉𝙀𝙒 𝘿𝙀𝘼𝙇 𝘾𝙍𝙀𝘼𝙏𝙀𝘿!</b>
+            admin_msg = f"""
+📋 𝐍𝐄𝐖 𝐃𝐄𝐀𝐋 𝐅𝐎𝐑𝐌 📋
 ━━━━━━━━━━━━━━━━━━
-📋 Deal ID: <code>{deal_id}</code>
-👤 Buyer: @{deal_data['buyer']}
-👤 Seller: @{deal_data['seller']}
-💰 Amount: {deal_data['amount']}
-📅 Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+🆔 <code>{deal_id}</code>
+💰 𝐀𝐦𝐨𝐮𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧: {data.get('deal_amount', '𝐍/𝐀')}
+👤 𝐁𝐮𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐫: {buyers}
+👤 𝐒𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐫: {seller}
+👤 𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐲: @{update.effective_user.username or '𝐍𝐨𝐧𝐞'}
 ━━━━━━━━━━━━━━━━━━
-Use /check {deal_id} to view deal
-                """),
-                parse_mode="HTML"
-            )
+"""
+            await context.bot.send_message(chat_id=int(admin_id), text=wrap_with_emojis(admin_msg), parse_mode="HTML")
+        except:
+            pass
+
+async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or update.effective_chat.type != "private":
+        return
+    
+    uid = update.effective_user.id
+    text = update.message.text
+    
+    if not text:
+        # Check for GIF
+        if update.message.animation and context.user_data.get("awaiting_gif_file"):
+            keyword = context.user_data.get("gif_keyword", "")
+            if keyword:
+                gif_id = update.message.animation.file_id
+                gifs_data["gifs"][keyword] = gif_id
+                save_json(GIFS_FILE, gifs_data)
+                context.user_data["awaiting_gif_keyword"] = False
+                context.user_data["awaiting_gif_file"] = False
+                context.user_data["gif_keyword"] = ""
+                await update.message.reply_text(
+                    f"✅ 𝐆𝐈𝐅 𝐒𝐀𝐕𝐄𝐃!\n━━━━━━━━━━━━━━━━━━\n𝐊𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧: {keyword}\n𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐬𝐞/𝐝𝐢𝐜𝐞 {keyword}\n━━━━━━━━━━━━━━━━━━",
+                    parse_mode="HTML"
+                )
+            return
+        return
+    
+    # Check for GIF keyword trigger
+    if text.lower() in gifs_data.get("gifs", {}):
+        gif_id = gifs_data["gifs"][text.lower()]
+        await context.bot.send_animation(chat_id=GROUP_ID, animation=gif_id)
+        await update.message.reply_text(f"✅ 𝐆𝐈𝐅 𝐬𝐞𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧!", parse_mode="HTML")
+        return
+    
+    if context.user_data.get("awaiting_gif_keyword"):
+        keyword = text.strip().lower()
+        context.user_data["gif_keyword"] = keyword
+        context.user_data["awaiting_gif_keyword"] = False
+        context.user_data["awaiting_gif_file"] = True
+        await update.message.reply_text(
+            f"✅ 𝐊𝐞𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧: {to_fancy(keyword)}\n𝐍𝐨𝐁𝐞𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧 𝐦𝐞 𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧 𝐆𝐈𝐅!",
+            parse_mode="HTML"
+        )
+        return
+
+# ============ AUTO LOCK/UNLOCK CHECKER ============
+async def auto_lock_check(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now()
+    current_time = now.strftime("%H:%M")
+    
+    lock_time = config.get("lock_time")
+    unlock_time = config.get("unlock_time")
+    
+    if lock_time and current_time == lock_time and not config.get("locked"):
+        try:
+            permissions = {
+                "can_send_messages": False,
+                "can_send_media_messages": False,
+                "can_send_polls": False,
+                "can_send_other_messages": False,
+                "can_add_web_page_previews": False,
+                "can_change_info": False,
+                "can_invite_users": False,
+                "can_pin_messages": False
+            }
+            await context.bot.set_chat_permissions(GROUP_ID, permissions)
+            config["locked"] = True
+            save_json(CONFIG_FILE, config)
+            
+            speech = config.get("morning_speech", "")
+            lock_msg = f"🔒 𝐀𝐔𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁 𝐋𝐎𝐂𝐊𝐄𝐁𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁🔒\n━━━━━━━━━━━━━━━━━━\n𝐆𝐫𝐨𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁 𝐡𝐚𝐁𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁 𝐛𝐞𝐞𝐧 𝐚𝐁𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁-𝐥𝐨𝐜𝐁𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁𝐁𝐟𝐨𝐫𝐞𝐁𝐞𝐁𝐟𝐨𝐫𝐞𝐡𝐚𝐧𝐁ed!\n━━━━━━━━━━━━━━━━━━"
+            if speech:
+                lock_msg += f"\n{speech}\n━━━━━━━━━━━━━━━━━━\n"
+            await context.bot.send_message(chat_id=GROUP_ID, text=wrap_with_emojis(lock_msg), parse_mode="HTML")
         except:
             pass
     
-    await update.message.reply_text(
-        format_with_emojis(f"✅ Deal created successfully!\n📋 Deal ID: <code>{deal_id}</code>"),
-        parse_mode="HTML"
-    )
-
-# ============ AUTO LOCK/UNLOCK ============
-async def auto_lock_unlock(context):
-    settings = load_settings()
-    now = datetime.now().strftime('%H:%M')
-    
-    lock_time = settings.get('lock_time', '19:30')
-    unlock_time = settings.get('unlock_time', '07:00')
-    
-    if now == lock_time and not settings.get('group_locked', False):
-        settings['group_locked'] = True
-        save_settings(settings)
-        speech = load_speeches().get('night', '🌙 Good Night! Group is locked.')
-        await context.bot.send_message(
-            chat_id=GROUP_ID,
-            text=format_with_emojis(speech),
-            parse_mode="HTML"
-        )
-    
-    elif now == unlock_time and settings.get('group_locked', False):
-        settings['group_locked'] = False
-        save_settings(settings)
-        speech = load_speeches().get('morning', '🌅 Good Morning! New day, new deals!')
-        await context.bot.send_message(
-            chat_id=GROUP_ID,
-            text=format_with_emojis(speech),
-            parse_mode="HTML"
-        )
+    if unlock_time and current_time == unlock_time and config.get("locked"):
+        try:
+            permissions = {
+                "can_send_messages": True,
+                "can_send_media_messages": True,
+                "can_send_polls": True,
+                "can_send_other_messages": True,
+                "can_add_web_page_previews": True,
+                "can_change_info": False,
+                "can_invite_users": True,
+                "can_pin_messages": False
+            }
+            await context.bot.set_chat_permissions(GROUP_ID, permissions)
+            config["locked"] = False
+            save_json(CONFIG_FILE, config)
+            
+            unlock_msg = f"🔓 𝐀𝐔𝐓𝐎 𝐔𝐍𝐋𝐎𝐂𝐊𝐄𝐃 🔓\n━━━━━━━━━━━━━━━━━━\n━━━━━━━━━━━━━━━━━━"
+            await context.bot.send_message(chat_id=GROUP_ID, text=wrap_with_emojis(unlock_msg), parse_mode="HTML")
+        except:
+            pass
 
 # ============ MAIN ============
 def main():
-    threading.Thread(target=run_flask, daemon=True).start()
+    Thread(target=run_flask, daemon=True).start()
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # User commands
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("time", time_command))
+    # Commands
+    application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("time", time_cmd))
+    application.add_handler(CommandHandler("lock", lock_cmd))
+    application.add_handler(CommandHandler("unlock", unlock_cmd))
+    application.add_handler(CommandHandler("setlock", setlock_cmd))
+    application.add_handler(CommandHandler("setunlock", setunlock_cmd))
+    application.add_handler(CommandHandler("setspeech", setspeech_cmd))
+    application.add_handler(CommandHandler("broadcast", broadcast_cmd))
+    application.add_handler(CommandHandler("send", send_cmd))
+    application.add_handler(CommandHandler("approve", approve_cmd))
+    application.add_handler(CommandHandler("removeadmin", removeadmin_cmd))
+    application.add_handler(CommandHandler("check", check_cmd))
+    application.add_handler(CommandHandler("dice", dice_cmd))
+    application.add_handler(CommandHandler("owner", owner_cmd))
+    application.add_handler(CommandHandler("admins", admins_cmd))
     
-    # Admin commands
-    application.add_handler(CommandHandler("lock", lock_command))
-    application.add_handler(CommandHandler("unlock", unlock_command))
-    application.add_handler(CommandHandler("admins", list_admins))
-    application.add_handler(CommandHandler("broadcast", broadcast_command))
-    application.add_handler(CommandHandler("send", send_command))
-    application.add_handler(CommandHandler("dice", dice_command))
-    application.add_handler(CommandHandler("check", check_deal))
-    application.add_handler(CommandHandler("gif", gif_command))
-    application.add_handler(CommandHandler("listgifs", list_gifs_command))
+    # Callback
+    application.add_handler(CallbackQueryHandler(button_callback))
     
-    # Owner commands
-    application.add_handler(CommandHandler("approve", approve_admin))
-    application.add_handler(CommandHandler("removeadmin", remove_admin))
-    application.add_handler(CommandHandler("setlock", set_lock_time))
-    application.add_handler(CommandHandler("setunlock", set_unlock_time))
-    application.add_handler(CommandHandler("setmorning", set_morning_speech))
-    application.add_handler(CommandHandler("setnight", set_night_speech))
-    application.add_handler(CommandHandler("addgif", add_gif_command))
+    # Message handlers
+    application.add_handler(MessageHandler(filters.TEXT & filters.Chat(GROUP_ID), handle_group_message))
+    application.add_handler(MessageHandler(filters.TEXT & filters.PRIVATE, handle_private_message))
+    application.add_handler(MessageHandler(filters.ANIMATION & filters.PRIVATE, handle_private_message))
     
-    # Deal form handler
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_deal_form))
-    
-    # Auto lock/unlock job
+    # Auto lock/unlock job - check every minute
     job_queue = application.job_queue
-    job_queue.run_repeating(auto_lock_unlock, interval=60, first=10)
+    job_queue.run_repeating(auto_lock_check, interval=60, first=10)
     
-    print("=" * 60)
-    print("🔥 KALYUG ESCROW DEAL BOT STARTED!")
+    print("=" * 50)
+    print("✨ KALYUG ESCROW BOT STARTED!")
     print(f"👑 Owner: {OWNER_ID}")
-    print(f"📋 Group ID: {GROUP_ID}")
-    print(f"👥 Admins: {len(load_admins())}")
-    print("=" * 60)
+    print(f"📋 Group: {GROUP_ID}")
+    print(f"📦 Total Emojis: {len(PREMIUM_EMOJIS)}")
+    print(f"✅ Bot is ready!")
+    print("=" * 50)
     
     application.run_polling()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import time
-        time.sleep(5)
+    main()
